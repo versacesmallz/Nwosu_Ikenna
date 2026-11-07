@@ -1,0 +1,27 @@
+-- Q5 [round2] Operations: deliveries still open (processing / in transit) for orders older than 3 days
+-- random_page_cost=1.1; median of 7 warm runs: 10.398 ms (min 7.196, max 12.871); planning 0.446 ms; shared buffers touched: 14981
+-- SQL executed:
+--   SELECT d.delivery_id, d.order_id, d.courier, d.tracking_no, d.dlv_status, o.order_date
+--   FROM   delivery d
+--   JOIN   orders o ON o.order_id = d.order_id
+--   WHERE  d.dlv_status IN ('PROCESSING','IN_TRANSIT')
+--   AND    o.order_date < timestamptz '2026-10-31' - interval '3 days'
+--   ORDER  BY o.order_date;
+
+Sort  (cost=5692.22..5702.33 rows=4043 width=62) (actual time=10.397..10.489 rows=1892 loops=1)
+  Sort Key: o.order_date
+  Sort Method: quicksort  Memory: 214kB
+  Buffers: shared hit=14981
+  ->  Nested Loop  (cost=0.70..5450.02 rows=4043 width=62) (actual time=0.026..9.635 rows=1892 loops=1)
+        Buffers: shared hit=14981
+        ->  Index Scan using ix_delivery_open on delivery d  (cost=0.28..126.94 rows=4084 width=54) (actual time=0.013..1.009 rows=3728 loops=1)
+              Buffers: shared hit=69
+        ->  Index Scan using orders_pkey on orders o  (cost=0.42..1.30 rows=1 width=16) (actual time=0.002..0.002 rows=1 loops=3728)
+              Index Cond: (order_id = d.order_id)
+              Filter: (order_date < ('2026-10-31 00:00:00+01'::timestamp with time zone - '3 days'::interval))
+              Rows Removed by Filter: 0
+              Buffers: shared hit=14912
+Planning:
+  Buffers: shared hit=22
+Planning Time: 0.533 ms
+Execution Time: 10.580 ms

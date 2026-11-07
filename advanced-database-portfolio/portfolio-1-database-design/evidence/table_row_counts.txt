@@ -1,0 +1,19 @@
+SET
+   table_name   | row_count 
+----------------+-----------
+ order_item     |    600153
+ orders         |    300000
+ payment        |    280377
+ delivery       |    280377
+ customer       |     50000
+ address        |     50000
+ product_review |     38736
+ inventory      |      5000
+ product        |      5000
+ seller         |       400
+ state          |        37
+ category       |        18
+ region         |         6
+ stock_movement |         0
+(14 rows)
+

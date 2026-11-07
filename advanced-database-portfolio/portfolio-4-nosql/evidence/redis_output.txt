@@ -1,0 +1,75 @@
+
+==========================================================================================
+0. Environment
+==========================================================================================
+Redis 7.0.15  mode=standalone  (flushing demo keys only)
+
+==========================================================================================
+1. SESSION STORE - HASH with sliding expiry (TTL)
+==========================================================================================
+redis> HSET session:41102da92ed34246 customer_id 20211 name 'Halima Danjuma' state 'Osun' device android
+       4 fields
+redis> EXPIRE session:41102da92ed34246 1800
+       1
+redis> HGETALL session:41102da92ed34246
+       {'customer_id': '20211', 'name': 'Halima Danjuma', 'state': 'Osun', 'device': 'android'}
+redis> TTL session:41102da92ed34246
+       1800 seconds left
+redis> (second session with 2 s TTL) EXISTS session:335391047f854430
+       1
+redis> (after 2.2 s) EXISTS session:335391047f854430
+       0  <- expired automatically, no cleanup job needed
+
+==========================================================================================
+2. SHOPPING CART - HASH per customer, atomic field increments
+==========================================================================================
+redis> HINCRBY cart:20211 5001 1 ; HINCRBY cart:20211 17 2 ; HINCRBY cart:20211 17 1
+       
+redis> HGETALL cart:20211
+       {'5001': '1', '17': '3'}
+redis> HDEL cart:20211 5001  (customer removes item)
+       {'17': '3'}
+Why Redis: carts are written on every click, read by one user, keyed by customer, and are disposable. Keeping them out of PostgreSQL removes the highest-frequency writes from the OLTP database.
+
+==========================================================================================
+3. PRODUCT PAGE CACHE - cache-aside pattern, latency vs PostgreSQL
+==========================================================================================
+first request  -> cache MISS: loaded from PostgreSQL and stored with TTL 600 s
+second request -> cache HIT: {'product_id': 1, 'sku': 'KSW-000001', 'product_name': 'Hair Treatment Kit 1', 'unit_price': 59597.67, 'category_name': 'Hair Care', 'business_name': 'Crown Enterprises 351', 'qty_on_hand': 468, 'avg_rating': 3.55, 'reviews': 788}
+
+2000 product-page reads (same products, warm caches on both sides):
+  PostgreSQL 5-table join : median 0.620 ms, p95 1.023 ms
+  Redis GET (cache hit)   : median 0.204 ms, p95 0.345 ms
+  => 3.0x faster per read; PostgreSQL is then only hit on a miss.
+Invalidation rule: when a seller changes price/stock the application runs DEL cache:product:{id}; the TTL bounds staleness to 10 minutes even if an invalidation is missed.
+
+==========================================================================================
+4. FLASH-SALE STOCK COUNTER - atomic Lua script (check + decrement in one step)
+==========================================================================================
+redis> SET stock:5001 20
+       OK
+60 concurrent buyers, 20 units: sold=20, rejected=40, stock left=0  (220.3 ms)
+Redis executes each Lua script atomically (single-threaded command execution), so check-and-decrement cannot interleave - the same guarantee Portfolio 3 obtained with a conditional UPDATE, but without touching the database. PostgreSQL remains the system of record: successful reservations are written to orders asynchronously and a failed payment returns the unit with INCRBY.
+
+==========================================================================================
+5. REAL-TIME BESTSELLER LEADERBOARD - SORTED SET
+==========================================================================================
+loaded 4978 products into rank:bestsellers:2026-10 (one-off backfill from PostgreSQL; afterwards each sale runs ZINCRBY)
+redis> ZINCRBY rank:bestsellers:2026-10 3 42   (a new order for 3 units of product 42)
+       138.0
+redis> ZREVRANGE rank:bestsellers:2026-10 0 4 WITHSCORES
+       [('1', 1719.0), ('2', 581.0), ('3', 432.0), ('4', 411.0), ('5', 381.0)]
+redis> ZREVRANK rank:bestsellers:2026-10 42
+       rank #27
+top-10 query: Redis ZREVRANGE 0.187 ms vs PostgreSQL GROUP BY 72.4 ms
+same ranking as SQL (excluding the extra demo sale)? True
+
+==========================================================================================
+6. Memory footprint
+==========================================================================================
+MEMORY USAGE session:41102da92ed34246     152 bytes   TYPE hash
+MEMORY USAGE cart:20211                   72 bytes   TYPE hash
+MEMORY USAGE cache:product:1              328 bytes   TYPE string
+MEMORY USAGE stock:5001                   56 bytes   TYPE string
+MEMORY USAGE rank:bestsellers:2026-10     529219 bytes   TYPE zset
+INFO memory used_memory_human = 2.12M

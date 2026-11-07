@@ -1,0 +1,71 @@
+-- Q2 [round2] Merchandising report: top 10 Electronics products (whole category tree) by revenue in the last 30 days
+-- random_page_cost=1.1; median of 7 warm runs: 47.274 ms (min 34.697, max 60.156); planning 0.575 ms; shared buffers touched: 3383
+-- SQL executed:
+--   WITH RECURSIVE cat_tree AS (
+--       SELECT category_id FROM category WHERE category_name = 'Electronics'
+--       UNION ALL
+--       SELECT c.category_id FROM category c JOIN cat_tree t ON c.parent_category_id = t.category_id
+--   )
+--   SELECT p.product_id, p.product_name,
+--          SUM(s.units_sold) AS units_sold,
+--          SUM(s.revenue)    AS revenue
+--   FROM   mv_daily_product_sales s
+--   JOIN   product p ON p.product_id = s.product_id
+--   WHERE  s.sale_date >= date '2026-10-01'          -- = 2026-10-31 00:00 Lagos minus 30 days
+--   AND    p.category_id IN (SELECT category_id FROM cat_tree)
+--   GROUP  BY p.product_id, p.product_name
+--   ORDER  BY revenue DESC
+--   LIMIT  10;
+
+Limit  (cost=5478.37..5478.39 rows=10 width=89) (actual time=58.614..58.627 rows=10 loops=1)
+  Buffers: shared hit=3383
+  CTE cat_tree
+    ->  Recursive Union  (cost=0.00..19.56 rows=131 width=4) (actual time=0.012..0.048 rows=5 loops=1)
+          Buffers: shared hit=3
+          ->  Seq Scan on category  (cost=0.00..1.23 rows=1 width=4) (actual time=0.011..0.014 rows=1 loops=1)
+                Filter: ((category_name)::text = 'Electronics'::text)
+                Rows Removed by Filter: 17
+                Buffers: shared hit=1
+          ->  Hash Join  (cost=0.33..1.70 rows=13 width=4) (actual time=0.010..0.013 rows=2 loops=2)
+                Hash Cond: (c.parent_category_id = t.category_id)
+                Buffers: shared hit=2
+                ->  Seq Scan on category c  (cost=0.00..1.18 rows=18 width=8) (actual time=0.001..0.003 rows=18 loops=2)
+                      Buffers: shared hit=2
+                ->  Hash  (cost=0.20..0.20 rows=10 width=4) (actual time=0.002..0.002 rows=2 loops=2)
+                      Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                      ->  WorkTable Scan on cat_tree t  (cost=0.00..0.20 rows=10 width=4) (actual time=0.000..0.001 rows=2 loops=2)
+  ->  Sort  (cost=5458.81..5471.31 rows=5000 width=89) (actual time=58.612..58.617 rows=10 loops=1)
+        Sort Key: (sum(s.revenue)) DESC
+        Sort Method: top-N heapsort  Memory: 26kB
+        Buffers: shared hit=3383
+        ->  HashAggregate  (cost=5275.76..5350.76 rows=5000 width=89) (actual time=56.614..58.046 rows=1498 loops=1)
+              Group Key: p.product_id
+              Batches: 1  Memory Usage: 977kB
+              Buffers: shared hit=3383
+              ->  Hash Semi Join  (cost=566.76..5004.23 rows=36204 width=41) (actual time=6.077..46.833 rows=10450 loops=1)
+                    Hash Cond: (p.category_id = cat_tree.category_id)
+                    Buffers: shared hit=3383
+                    ->  Hash Join  (cost=562.50..4502.17 rows=36204 width=45) (actual time=5.995..41.286 rows=34893 loops=1)
+                          Hash Cond: (s.product_id = p.product_id)
+                          Buffers: shared hit=3380
+                          ->  Bitmap Heap Scan on mv_daily_product_sales s  (cost=391.00..4235.55 rows=36204 width=20) (actual time=3.620..20.632 rows=34893 loops=1)
+                                Recheck Cond: (sale_date >= '2026-10-01'::date)
+                                Heap Blocks: exact=3222
+                                Buffers: shared hit=3321
+                                ->  Bitmap Index Scan on ux_mv_daily_product_sales  (cost=0.00..381.95 rows=36204 width=0) (actual time=3.104..3.104 rows=34893 loops=1)
+                                      Index Cond: (sale_date >= '2026-10-01'::date)
+                                      Buffers: shared hit=99
+                          ->  Hash  (cost=109.00..109.00 rows=5000 width=29) (actual time=2.354..2.355 rows=5000 loops=1)
+                                Buckets: 8192  Batches: 1  Memory Usage: 374kB
+                                Buffers: shared hit=59
+                                ->  Seq Scan on product p  (cost=0.00..109.00 rows=5000 width=29) (actual time=0.008..1.208 rows=5000 loops=1)
+                                      Buffers: shared hit=59
+                    ->  Hash  (cost=2.62..2.62 rows=131 width=4) (actual time=0.049..0.050 rows=5 loops=1)
+                          Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                          Buffers: shared hit=3
+                          ->  CTE Scan on cat_tree  (cost=0.00..2.62 rows=131 width=4) (actual time=0.014..0.046 rows=5 loops=1)
+                                Buffers: shared hit=3
+Planning:
+  Buffers: shared hit=10
+Planning Time: 0.647 ms
+Execution Time: 58.846 ms

@@ -1,0 +1,31 @@
+SET
+--- T1: stock can never go negative (CHECK qty_on_hand >= 0)
+psql:03_constraint_tests.sql:10: ERROR:  new row for relation "inventory" violates check constraint "inventory_qty_on_hand_check"
+DETAIL:  Failing row contains (1, -1, 0, 2026-11-05 10:33:02.925873+01).
+--- T2: phone must be Nigerian E.164 format (CHECK regex)
+psql:03_constraint_tests.sql:13: ERROR:  new row for relation "customer" violates check constraint "customer_phone_check"
+DETAIL:  Failing row contains (50001, Test User, t1@x.ng, 08031234567, 33, 2026-11-05 10:33:53.745372+01).
+--- T3: email is a candidate key (UNIQUE)
+psql:03_constraint_tests.sql:16: ERROR:  duplicate key value violates unique constraint "customer_email_key"
+DETAIL:  Key (email)=(cust1@mail.kasuwa.ng) already exists.
+--- T4: only one default address per customer (partial UNIQUE index)
+psql:03_constraint_tests.sql:19: ERROR:  duplicate key value violates unique constraint "ux_address_one_default"
+DETAIL:  Key (customer_id)=(1) already exists.
+--- T5: referential integrity - order for a customer that does not exist (FK)
+psql:03_constraint_tests.sql:22: ERROR:  insert or update on table "orders" violates foreign key constraint "orders_customer_id_fkey"
+DETAIL:  Key (customer_id)=(999999) is not present in table "customer".
+--- T6: domain of order_status (CHECK IN list)
+psql:03_constraint_tests.sql:25: ERROR:  new row for relation "orders" violates check constraint "orders_order_status_check"
+DETAIL:  Failing row contains (1, 20211, 20211, LOST, 2024-11-02 09:18:29.260578+01).
+--- T7: one review per customer per product (composite UNIQUE)
+psql:03_constraint_tests.sql:29: ERROR:  duplicate key value violates unique constraint "product_review_product_id_customer_id_key"
+DETAIL:  Key (product_id, customer_id)=(1, 67) already exists.
+--- T8: rating must be 1..5
+psql:03_constraint_tests.sql:32: ERROR:  new row for relation "product_review" violates check constraint "product_review_rating_check"
+DETAIL:  Failing row contains (38738, 10, 10, 9, null, 2026-11-05 10:33:53.750233+01).
+--- T9: delivered_at cannot precede dispatched_at (table-level CHECK)
+psql:03_constraint_tests.sql:35: ERROR:  new row for relation "delivery" violates check constraint "delivery_check"
+DETAIL:  Failing row contains (1, 1, Kasuwa Express, TRK0000000001, DELIVERED, 2024-11-03 09:18:29.260578+01, 2024-11-02 09:18:29.260578+01).
+--- T10: a product cannot be deleted while it appears on orders (FK RESTRICT)
+psql:03_constraint_tests.sql:38: ERROR:  update or delete on table "product" violates foreign key constraint "order_item_product_id_fkey" on table "order_item"
+DETAIL:  Key (product_id)=(1) is still referenced from table "order_item".

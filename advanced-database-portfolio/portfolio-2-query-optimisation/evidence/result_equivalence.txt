@@ -1,0 +1,4 @@
+Rewritten queries must return exactly the same rows as the originals
+Q3 round1: original rows=60, rewritten rows=60, identical=True
+Q2 round2: original rows=10, rewritten rows=10, identical=True
+Q3 round2: original rows=60, rewritten rows=60, identical=True

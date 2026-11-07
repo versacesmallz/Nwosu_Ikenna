@@ -1,0 +1,35 @@
+-- Q5 [baseline] Operations: deliveries still open (processing / in transit) for orders older than 3 days
+-- random_page_cost=4; median of 7 warm runs: 61.727 ms (min 54.970, max 70.310); planning 0.380 ms; shared buffers touched: 18429
+-- SQL executed:
+--   SELECT d.delivery_id, d.order_id, d.courier, d.tracking_no, d.dlv_status, o.order_date
+--   FROM   delivery d
+--   JOIN   orders o ON o.order_id = d.order_id
+--   WHERE  d.dlv_status IN ('PROCESSING','IN_TRANSIT')
+--   AND    o.order_date < timestamptz '2026-10-31' - interval '3 days'
+--   ORDER  BY o.order_date;
+
+Gather Merge  (cost=11909.36..12276.19 rows=3144 width=62) (actual time=62.581..67.401 rows=1892 loops=1)
+  Workers Planned: 2
+  Workers Launched: 2
+  Buffers: shared hit=18437
+  ->  Sort  (cost=10909.34..10913.27 rows=1572 width=62) (actual time=22.993..23.032 rows=631 loops=3)
+        Sort Key: o.order_date
+        Sort Method: quicksort  Memory: 208kB
+        Buffers: shared hit=18437
+        Worker 0:  Sort Method: quicksort  Memory: 30kB
+        Worker 1:  Sort Method: quicksort  Memory: 25kB
+        ->  Nested Loop  (cost=0.42..10825.88 rows=1572 width=62) (actual time=19.037..22.762 rows=631 loops=3)
+              Buffers: shared hit=18421
+              ->  Parallel Seq Scan on delivery d  (cost=0.00..4961.30 rows=1589 width=54) (actual time=17.197..17.588 rows=1243 loops=3)
+                    Filter: ((dlv_status)::text = ANY ('{PROCESSING,IN_TRANSIT}'::text[]))
+                    Rows Removed by Filter: 92216
+                    Buffers: shared hit=3507
+              ->  Index Scan using orders_pkey on orders o  (cost=0.42..3.69 rows=1 width=16) (actual time=0.003..0.003 rows=1 loops=3728)
+                    Index Cond: (order_id = d.order_id)
+                    Filter: (order_date < ('2026-10-31 00:00:00+01'::timestamp with time zone - '3 days'::interval))
+                    Rows Removed by Filter: 0
+                    Buffers: shared hit=14914
+Planning:
+  Buffers: shared hit=17
+Planning Time: 0.381 ms
+Execution Time: 67.510 ms

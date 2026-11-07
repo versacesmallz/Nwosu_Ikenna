@@ -1,0 +1,29 @@
+// Kasuwa distributed lab topology (as built and tested) - render: dot -Tpng topology.dot -o topology.png
+digraph topology {
+  graph [rankdir=LR, fontname="Helvetica", nodesep=0.5, ranksep=0.9, bgcolor="white",
+         label="Kasuwa Marketplace - distributed PostgreSQL 16 lab topology (4 server processes)", labelloc=t, fontsize=16];
+  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#334155"];
+  edge  [fontname="Helvetica", fontsize=9, color="#475569", fontcolor="#334155"];
+
+  app     [label="Kasuwa web / mobile app\n(writes + live reads)", fillcolor="#E2E8F0"];
+  reports [label="Reporting / analytics\n(read-only)", fillcolor="#E2E8F0"];
+  redis   [label="Redis 7\nsessions, carts, cache,\nflash-sale stock (Portfolio 4)", fillcolor="#FEE2E2"];
+
+  subgraph cluster_ha {
+    label="High availability: replication"; style="rounded,dashed"; color="#1D4ED8"; fontcolor="#1D4ED8"; fontname="Helvetica";
+    primary  [label="primary :5432\nkasuwa (read/write)\n+ shard coordinator\n(postgres_fdw)", fillcolor="#DBEAFE"];
+    replica  [label="replica1 :5433\nhot standby (read-only)\nphysical slot replica1_slot", fillcolor="#EFF6FF"];
+  }
+  subgraph cluster_shards {
+    label="Horizontal scaling: shards by geopolitical zone"; style="rounded,dashed"; color="#15803D"; fontcolor="#15803D"; fontname="Helvetica";
+    south [label="shard_south :5434\nSE, SS, SW\n192,107 orders", fillcolor="#DCFCE7"];
+    north [label="shard_north :5435\nNC, NE, NW\n107,895 orders", fillcolor="#F0FDF4"];
+  }
+
+  app -> redis   [label="key-value"];
+  app -> primary [label="SQL"];
+  reports -> replica [label="read scaling"];
+  primary -> replica [label="WAL streaming\nasync / sync (E6, E7)\npromote on failure (E8)", penwidth=2, color="#1D4ED8"];
+  primary -> south   [label="orders_global partition\nFOR VALUES IN (SE,SS,SW)", color="#15803D"];
+  primary -> north   [label="orders_global partition\nFOR VALUES IN (NC,NE,NW)", color="#15803D"];
+}

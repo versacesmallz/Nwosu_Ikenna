@@ -1,0 +1,36 @@
+== primary: enable replication settings and restart
+waiting for server to shut down.... done
+server stopped
+waiting for server to start.... done
+server started
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+ pg_create_physical_replication_slot 
+-------------------------------------
+ (replica1_slot,)
+(1 row)
+
+== replica1: base backup of primary with -R (writes standby.signal + primary_conninfo)
+waiting for checkpoint
+325044/325044 kB (100%), 0/1 tablespace
+325044/325044 kB (100%), 1/1 tablespace
+waiting for server to start.... done
+server started
+== shard_south on port 5434
+waiting for server to shut down.... done
+server stopped
+waiting for server to start.... done
+server started
+== shard_north on port 5435
+waiting for server to shut down.... done
+server stopped
+waiting for server to start.... done
+server started
+== cluster status
+port 5432 : primary (read/write), /home/claude/pg/primary
+port 5433 : standby (read-only), /home/claude/pg/replica1
+port 5434 : primary (read/write), /home/claude/pg/shard_south
+port 5435 : primary (read/write), /home/claude/pg/shard_north

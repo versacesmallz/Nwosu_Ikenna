@@ -1,0 +1,20 @@
+                                            Table "kasuwa.order_item"
+   Column   |     Type      | Collation | Nullable | Default | Storage | Compression | Stats target | Description 
+------------+---------------+-----------+----------+---------+---------+-------------+--------------+-------------
+ order_id   | bigint        |           | not null |         | plain   |             |              | 
+ line_no    | smallint      |           | not null |         | plain   |             |              | 
+ product_id | integer       |           | not null |         | plain   |             |              | 
+ quantity   | integer       |           | not null |         | plain   |             |              | 
+ unit_price | numeric(12,2) |           | not null |         | main    |             |              | 
+Indexes:
+    "order_item_pkey" PRIMARY KEY, btree (order_id, line_no)
+    "order_item_order_id_product_id_key" UNIQUE CONSTRAINT, btree (order_id, product_id)
+Check constraints:
+    "order_item_line_no_check" CHECK (line_no > 0)
+    "order_item_quantity_check" CHECK (quantity > 0)
+    "order_item_unit_price_check" CHECK (unit_price > 0::numeric)
+Foreign-key constraints:
+    "order_item_order_id_fkey" FOREIGN KEY (order_id) REFERENCES kasuwa.orders(order_id) ON DELETE CASCADE
+    "order_item_product_id_fkey" FOREIGN KEY (product_id) REFERENCES kasuwa.product(product_id)
+Access method: heap
+

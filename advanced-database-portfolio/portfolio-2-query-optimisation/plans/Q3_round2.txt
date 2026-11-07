@@ -1,0 +1,13 @@
+-- Q3 [round2] Management dashboard: monthly revenue and order count per geopolitical zone for 2026
+-- random_page_cost=1.1; median of 7 warm runs: 0.031 ms (min 0.023, max 0.035); planning 0.029 ms; shared buffers touched: 3
+-- SQL executed:
+--   SELECT region_name, month, orders, revenue
+--   FROM   mv_monthly_region_sales
+--   WHERE  month >= date '2026-01-01'
+--   ORDER  BY region_name, month;
+
+Index Scan using ux_mv_monthly_region_sales on mv_monthly_region_sales  (cost=0.14..5.61 rows=60 width=33) (actual time=0.007..0.014 rows=60 loops=1)
+  Index Cond: (month >= '2026-01-01'::date)
+  Buffers: shared hit=3
+Planning Time: 0.025 ms
+Execution Time: 0.021 ms

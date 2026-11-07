@@ -1,0 +1,18 @@
+-- Q3 [round1] Management dashboard: monthly revenue and order count per geopolitical zone for 2026
+-- random_page_cost=4; median of 7 warm runs: 0.035 ms (min 0.032, max 0.050); planning 0.025 ms; shared buffers touched: 2
+-- SQL executed:
+--   SELECT region_name, month, orders, revenue
+--   FROM   mv_monthly_region_sales
+--   WHERE  month >= date '2026-01-01'
+--   ORDER  BY region_name, month;
+
+Sort  (cost=5.57..5.72 rows=60 width=33) (actual time=0.049..0.052 rows=60 loops=1)
+  Sort Key: region_name, month
+  Sort Method: quicksort  Memory: 28kB
+  Buffers: shared hit=2
+  ->  Seq Scan on mv_monthly_region_sales  (cost=0.00..3.80 rows=60 width=33) (actual time=0.005..0.014 rows=60 loops=1)
+        Filter: (month >= '2026-01-01'::date)
+        Rows Removed by Filter: 84
+        Buffers: shared hit=2
+Planning Time: 0.025 ms
+Execution Time: 0.060 ms

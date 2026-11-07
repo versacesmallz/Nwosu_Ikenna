@@ -1,0 +1,87 @@
+// Kasuwa Marketplace - Entity Relationship Diagram (crow's foot notation)
+// Render: dot -Tpng erd.dot -o erd.png   |   dot -Tsvg erd.dot -o erd.svg
+digraph KasuwaERD {
+  graph [rankdir=LR, splines=polyline, nodesep=0.55, ranksep=1.1, fontname="Helvetica", bgcolor="white",
+         label="Kasuwa Marketplace - ER Diagram (PK = primary key, FK = foreign key, UQ = unique)", labelloc=t, fontsize=18];
+  node  [shape=plain, fontname="Helvetica", fontsize=11];
+  edge  [dir=both, arrowsize=0.9, color="#334155", fontname="Helvetica", fontsize=9, fontcolor="#475569"];
+
+  region [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#F8FAFC">
+    <TR><TD BGCOLOR="#64748B"><FONT COLOR="white"><B>REGION</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">PK region_id</TD></TR><TR><TD ALIGN="LEFT">UQ region_code</TD></TR><TR><TD ALIGN="LEFT">region_name</TD></TR></TABLE>>];
+
+  state [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#F8FAFC">
+    <TR><TD BGCOLOR="#64748B"><FONT COLOR="white"><B>STATE</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">PK state_id</TD></TR><TR><TD ALIGN="LEFT">UQ state_name</TD></TR><TR><TD ALIGN="LEFT">FK region_id</TD></TR></TABLE>>];
+
+  customer [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#EFF6FF">
+    <TR><TD BGCOLOR="#1D4ED8"><FONT COLOR="white"><B>CUSTOMER</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">PK customer_id</TD></TR><TR><TD ALIGN="LEFT">full_name</TD></TR><TR><TD ALIGN="LEFT">UQ email</TD></TR>
+    <TR><TD ALIGN="LEFT">UQ phone (+234 check)</TD></TR><TR><TD ALIGN="LEFT">FK state_id</TD></TR><TR><TD ALIGN="LEFT">created_at</TD></TR></TABLE>>];
+
+  address [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#EFF6FF">
+    <TR><TD BGCOLOR="#1D4ED8"><FONT COLOR="white"><B>ADDRESS</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">PK address_id</TD></TR><TR><TD ALIGN="LEFT">FK customer_id</TD></TR><TR><TD ALIGN="LEFT">line1, city</TD></TR>
+    <TR><TD ALIGN="LEFT">FK state_id</TD></TR><TR><TD ALIGN="LEFT">is_default (1 per customer)</TD></TR></TABLE>>];
+
+  seller [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#F0FDF4">
+    <TR><TD BGCOLOR="#15803D"><FONT COLOR="white"><B>SELLER</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">PK seller_id</TD></TR><TR><TD ALIGN="LEFT">business_name</TD></TR><TR><TD ALIGN="LEFT">UQ email</TD></TR>
+    <TR><TD ALIGN="LEFT">UQ cac_number</TD></TR><TR><TD ALIGN="LEFT">FK state_id</TD></TR></TABLE>>];
+
+  category [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#F0FDF4">
+    <TR><TD BGCOLOR="#15803D"><FONT COLOR="white"><B>CATEGORY</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">PK category_id</TD></TR><TR><TD ALIGN="LEFT">UQ category_name</TD></TR><TR><TD ALIGN="LEFT">FK parent_category_id</TD></TR></TABLE>>];
+
+  product [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#F0FDF4">
+    <TR><TD BGCOLOR="#15803D"><FONT COLOR="white"><B>PRODUCT</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">PK product_id</TD></TR><TR><TD ALIGN="LEFT">UQ sku</TD></TR><TR><TD ALIGN="LEFT">FK seller_id</TD></TR>
+    <TR><TD ALIGN="LEFT">FK category_id</TD></TR><TR><TD ALIGN="LEFT">product_name</TD></TR><TR><TD ALIGN="LEFT">unit_price (&gt; 0)</TD></TR><TR><TD ALIGN="LEFT">is_active</TD></TR></TABLE>>];
+
+  inventory [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#F0FDF4">
+    <TR><TD BGCOLOR="#15803D"><FONT COLOR="white"><B>INVENTORY</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">PK,FK product_id</TD></TR><TR><TD ALIGN="LEFT">qty_on_hand (&gt;= 0)</TD></TR><TR><TD ALIGN="LEFT">version</TD></TR></TABLE>>];
+
+  orders [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#FFF7ED">
+    <TR><TD BGCOLOR="#C2410C"><FONT COLOR="white"><B>ORDERS</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">PK order_id</TD></TR><TR><TD ALIGN="LEFT">FK customer_id</TD></TR><TR><TD ALIGN="LEFT">FK shipping_address_id</TD></TR>
+    <TR><TD ALIGN="LEFT">order_status</TD></TR><TR><TD ALIGN="LEFT">order_date</TD></TR></TABLE>>];
+
+  order_item [label=<<TABLE BORDER="2" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#FFF7ED">
+    <TR><TD BGCOLOR="#C2410C"><FONT COLOR="white"><B>ORDER_ITEM</B> (weak)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">PK,FK order_id</TD></TR><TR><TD ALIGN="LEFT">PK line_no</TD></TR><TR><TD ALIGN="LEFT">FK product_id</TD></TR>
+    <TR><TD ALIGN="LEFT">quantity (&gt; 0)</TD></TR><TR><TD ALIGN="LEFT">unit_price (at sale)</TD></TR></TABLE>>];
+
+  payment [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#FFF7ED">
+    <TR><TD BGCOLOR="#C2410C"><FONT COLOR="white"><B>PAYMENT</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">PK payment_id</TD></TR><TR><TD ALIGN="LEFT">FK order_id</TD></TR><TR><TD ALIGN="LEFT">method, amount</TD></TR>
+    <TR><TD ALIGN="LEFT">pay_status</TD></TR><TR><TD ALIGN="LEFT">UQ gateway_ref</TD></TR></TABLE>>];
+
+  delivery [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#FFF7ED">
+    <TR><TD BGCOLOR="#C2410C"><FONT COLOR="white"><B>DELIVERY</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">PK delivery_id</TD></TR><TR><TD ALIGN="LEFT">FK,UQ order_id</TD></TR><TR><TD ALIGN="LEFT">courier</TD></TR>
+    <TR><TD ALIGN="LEFT">UQ tracking_no</TD></TR><TR><TD ALIGN="LEFT">dlv_status</TD></TR><TR><TD ALIGN="LEFT">dispatched_at, delivered_at</TD></TR></TABLE>>];
+
+  review [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#FAF5FF">
+    <TR><TD BGCOLOR="#7E22CE"><FONT COLOR="white"><B>PRODUCT_REVIEW</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">PK review_id</TD></TR><TR><TD ALIGN="LEFT">FK product_id</TD></TR><TR><TD ALIGN="LEFT">FK customer_id</TD></TR>
+    <TR><TD ALIGN="LEFT">rating (1-5)</TD></TR><TR><TD ALIGN="LEFT">UQ (product_id, customer_id)</TD></TR></TABLE>>];
+
+  // "one" side = tee (|), "many" side = crow with optional circle (o<) or mandatory (|<)
+  region   -> state      [arrowtail=tee, arrowhead=crowodot, xlabel="contains"];
+  state    -> customer   [arrowtail=tee, arrowhead=crowodot, xlabel="home of"];
+  state    -> seller     [arrowtail=tee, arrowhead=crowodot];
+  customer -> address    [arrowtail=tee, arrowhead=crowtee,  xlabel="has"];
+  customer -> orders     [arrowtail=tee, arrowhead=crowodot, xlabel="places"];
+  address  -> orders     [arrowtail=tee, arrowhead=crowodot, xlabel="ships to"];
+  seller   -> product    [arrowtail=tee, arrowhead=crowodot, xlabel="lists"];
+  category -> product    [arrowtail=tee, arrowhead=crowodot, xlabel="classifies"];
+  category -> category   [arrowtail=teeodot, arrowhead=crowodot, xlabel="parent of"];
+  product  -> inventory  [arrowtail=tee, arrowhead=teetee,   xlabel="stocked as"];
+  orders   -> order_item [arrowtail=tee, arrowhead=crowtee,  xlabel="contains"];
+  product  -> order_item [arrowtail=tee, arrowhead=crowodot, xlabel="sold in"];
+  orders   -> payment    [arrowtail=tee, arrowhead=crowodot, xlabel="paid by"];
+  orders   -> delivery   [arrowtail=tee, arrowhead=teeodot,  xlabel="fulfilled by"];
+  customer -> review     [arrowtail=tee, arrowhead=crowodot, xlabel="writes"];
+  product  -> review     [arrowtail=tee, arrowhead=crowodot, xlabel="receives"];
+}

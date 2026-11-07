@@ -1,0 +1,52 @@
+Inserted 5001 product documents into kasuwa.products
+Indexes: ['_id_', 'ix_cat_ram_price', 'ix_sizes_multikey']
+
+==========================================================================================
+D1  5G phones, RAM >= 8 GB, under N500,000, best rated first
+mongosh> db.products.find({"category.name":"Mobile Phones","attributes.network":"5G","active":true,"attributes.ram_gb":{$gte:8},"price":{$lt:500000}}).sort({"rating.avg":-1}).limit(5)
+------------------------------------------------------------------------------------------
+  KSW-002252  Samsung Smartphone Model 2252    N  340,131.54  ram  8 GB  rating 5.0
+  KSW-002740  Samsung Smartphone Model 2740    N  146,554.25  ram 12 GB  rating 4.6
+  KSW-004172  Tecno Smartphone Model 4172      N  233,722.43  ram  8 GB  rating 4.5
+  KSW-000952  Tecno Smartphone Model 952       N  453,050.63  ram  8 GB  rating 4.4
+  KSW-004033  Tecno Smartphone Model 4033      N  279,769.52  ram 12 GB  rating 4.25
+
+==========================================================================================
+D2  aggregation pipeline: phone count and average price per brand
+mongosh> db.products.aggregate([{$match:{"category.name":"Mobile Phones"}},{$group:{_id:"$attributes.brand",phones:{$sum:1},avg_price:{$avg:"$price"}}},{$sort:{avg_price:-1}}])
+------------------------------------------------------------------------------------------
+  itel     phones= 54  avg_price=N  537,229
+  Xiaomi   phones= 69  avg_price=N  521,246
+  Samsung  phones= 70  avg_price=N  518,472
+  Infinix  phones= 73  avg_price=N  494,183
+  Apple    phones= 66  avg_price=N  489,494
+  Tecno    phones= 64  avg_price=N  482,666
+
+==========================================================================================
+D3  Ankara gowns in size 12 AND colour Green (query into arrays)
+mongosh> db.products.countDocuments({"category.name":"Women's Clothing","attributes.sizes":"12","attributes.colours":"Green"})
+------------------------------------------------------------------------------------------
+  matching documents: 133
+
+==========================================================================================
+D5  $unwind embedded reviews: share of 1-star reviews among latest reviews, per seller state
+mongosh> db.products.aggregate([{$unwind:"$recent_reviews"},{$group:{_id:"$seller.state",reviews:{$sum:1},one_star:{$sum:{$cond:[{$eq:["$recent_reviews.rating",1]},1,0]}}}},{$sort:{reviews:-1}},{$limit:5}])
+------------------------------------------------------------------------------------------
+  Lagos      reviews= 4651  one_star= 605  (13.0%)
+  Rivers     reviews= 2788  one_star= 343  (12.3%)
+  Kano       reviews= 1726  one_star= 205  (11.9%)
+  Edo        reviews= 1324  one_star= 146  (11.0%)
+  Oyo        reviews= 1277  one_star= 154  (12.1%)
+
+==========================================================================================
+U1  atomic in-document update when a new review arrives (bounded embedded array of 3)
+mongosh> db.products.updateOne({_id:"KSW-000028"},{$push:{recent_reviews:{$each:[{...}],$position:0,$slice:3}},$inc:{"rating.count":1}})
+------------------------------------------------------------------------------------------
+  rating.count 62 -> 63; recent_reviews length 3 -> 3; newest = 'Fast delivery to Port Harcourt'
+
+==========================================================================================
+Cross-check: MongoDB-API results vs PostgreSQL JSONB results
+------------------------------------------------------------------------------------------
+  D1 same 5 products in same order: True
+  D2 same brand counts: True
+  D3 same count: True

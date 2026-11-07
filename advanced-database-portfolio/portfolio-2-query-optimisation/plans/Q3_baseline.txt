@@ -1,0 +1,79 @@
+-- Q3 [baseline] Management dashboard: monthly revenue and order count per geopolitical zone for 2026
+-- random_page_cost=4; median of 7 warm runs: 1309.203 ms (min 1129.109, max 1448.997); planning 0.576 ms; shared buffers touched: 9282
+-- SQL executed:
+--   SELECT r.region_name,
+--          date_trunc('month', o.order_date)::date AS month,
+--          COUNT(DISTINCT o.order_id)              AS orders,
+--          SUM(oi.quantity * oi.unit_price)        AS revenue
+--   FROM   orders o
+--   JOIN   order_item oi ON oi.order_id = o.order_id
+--   JOIN   customer c    ON c.customer_id = o.customer_id
+--   JOIN   state s       ON s.state_id = c.state_id
+--   JOIN   region r      ON r.region_id = s.region_id
+--   WHERE  o.order_date >= timestamptz '2026-01-01'
+--   AND    o.order_status <> 'CANCELLED'
+--   GROUP  BY r.region_name, date_trunc('month', o.order_date)
+--   ORDER  BY r.region_name, month;
+
+Incremental Sort  (cost=53854.58..141762.20 rows=371867 width=63) (actual time=1178.703..1389.663 rows=60 loops=1)
+  Sort Key: r.region_name, (((date_trunc('month'::text, o.order_date)))::date)
+  Presorted Key: r.region_name
+  Full-sort Groups: 2  Sort Method: quicksort  Average Memory: 27kB  Peak Memory: 27kB
+  Buffers: shared hit=9282, temp read=2861 written=2868
+  ->  GroupAggregate  (cost=37202.74..93528.13 rows=371867 width=63) (actual time=1058.204..1389.470 rows=60 loops=1)
+        Group Key: r.region_name, (date_trunc('month'::text, o.order_date))
+        Buffers: shared hit=9282, temp read=2861 written=2868
+        ->  Gather Merge  (cost=37202.74..80512.78 rows=371867 width=47) (actual time=1053.549..1230.163 rows=371637 loops=1)
+              Workers Planned: 2
+              Workers Launched: 2
+              Buffers: shared hit=9282, temp read=2861 written=2868
+              ->  Sort  (cost=36202.72..36590.08 rows=154945 width=47) (actual time=976.800..1015.165 rows=123879 loops=3)
+                    Sort Key: r.region_name, (date_trunc('month'::text, o.order_date)), o.order_id
+                    Sort Method: external merge  Disk: 7048kB
+                    Buffers: shared hit=9282, temp read=2861 written=2868
+                    Worker 0:  Sort Method: external merge  Disk: 9184kB
+                    Worker 1:  Sort Method: external merge  Disk: 6656kB
+                    ->  Hash Join  (cost=8566.84..18078.38 rows=154945 width=47) (actual time=158.731..515.881 rows=123879 loops=3)
+                          Hash Cond: (s.region_id = r.region_id)
+                          Buffers: shared hit=9176
+                          ->  Hash Join  (cost=8565.70..16995.86 rows=154945 width=30) (actual time=116.311..378.405 rows=123879 loops=3)
+                                Hash Cond: (c.state_id = s.state_id)
+                                Buffers: shared hit=9115
+                                ->  Hash Join  (cost=8563.87..16540.70 rows=154945 width=30) (actual time=116.223..341.923 rows=123879 loops=3)
+                                      Hash Cond: (o.customer_id = c.customer_id)
+                                      Buffers: shared hit=9112
+                                      ->  Parallel Hash Join  (cost=6813.87..14383.94 rows=154945 width=36) (actual time=82.905..231.736 rows=123879 loops=3)
+                                            Hash Cond: (oi.order_id = o.order_id)
+                                            Buffers: shared hit=7213
+                                            ->  Parallel Seq Scan on order_item oi  (cost=0.00..6913.64 rows=250064 width=20) (actual time=0.013..31.483 rows=200051 loops=3)
+                                                  Buffers: shared hit=4413
+                                            ->  Parallel Hash  (cost=5447.06..5447.06 rows=109345 width=24) (actual time=43.852..43.854 rows=61891 loops=3)
+                                                  Buckets: 262144  Batches: 1  Memory Usage: 12256kB
+                                                  Buffers: shared hit=2800
+                                                  ->  Parallel Seq Scan on orders o  (cost=0.00..5447.06 rows=109345 width=24) (actual time=3.527..19.871 rows=92836 loops=2)
+                                                        Filter: ((order_date >= '2026-01-01 00:00:00+01'::timestamp with time zone) AND ((order_status)::text <> 'CANCELLED'::text))
+                                                        Rows Removed by Filter: 57164
+                                                        Buffers: shared hit=2800
+                                      ->  Hash  (cost=1125.00..1125.00 rows=50000 width=10) (actual time=32.979..32.980 rows=50000 loops=3)
+                                            Buckets: 65536  Batches: 1  Memory Usage: 2563kB
+                                            Buffers: shared hit=1875
+                                            ->  Seq Scan on customer c  (cost=0.00..1125.00 rows=50000 width=10) (actual time=0.041..15.273 rows=50000 loops=3)
+                                                  Buffers: shared hit=1875
+                                ->  Hash  (cost=1.37..1.37 rows=37 width=4) (actual time=0.065..0.066 rows=37 loops=3)
+                                      Buckets: 1024  Batches: 1  Memory Usage: 10kB
+                                      Buffers: shared hit=3
+                                      ->  Seq Scan on state s  (cost=0.00..1.37 rows=37 width=4) (actual time=0.052..0.057 rows=37 loops=3)
+                                            Buffers: shared hit=3
+                          ->  Hash  (cost=1.06..1.06 rows=6 width=13) (actual time=42.331..42.332 rows=6 loops=3)
+                                Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                                Buffers: shared hit=3
+                                ->  Seq Scan on region r  (cost=0.00..1.06 rows=6 width=13) (actual time=42.194..42.202 rows=6 loops=3)
+                                      Buffers: shared hit=3
+Planning:
+  Buffers: shared hit=32
+Planning Time: 0.545 ms
+JIT:
+  Functions: 114
+  Options: Inlining false, Optimization false, Expressions true, Deforming true
+  Timing: Generation 10.762 ms, Inlining 0.000 ms, Optimization 7.845 ms, Emission 119.424 ms, Total 138.031 ms
+Execution Time: 1392.307 ms

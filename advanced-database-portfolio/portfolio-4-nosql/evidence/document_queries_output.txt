@@ -1,0 +1,147 @@
+SET
+Timing is on.
+=== D1  5G phones, RAM >= 8 GB, under N500,000, best rated first ===
+    sku     |             name              |   price   | ram_gb | storage_gb | rating 
+------------+-------------------------------+-----------+--------+------------+--------
+ KSW-002252 | Samsung Smartphone Model 2252 | 340131.54 | 8      | 256        | 5.00
+ KSW-002740 | Samsung Smartphone Model 2740 | 146554.25 | 12     | 64         | 4.60
+ KSW-004172 | Tecno Smartphone Model 4172   | 233722.43 | 8      | 512        | 4.50
+ KSW-000952 | Tecno Smartphone Model 952    | 453050.63 | 8      | 32         | 4.40
+ KSW-004033 | Tecno Smartphone Model 4033   | 279769.52 | 12     | 32         | 4.25
+(5 rows)
+
+Time: 7.525 ms
+=== D2  aggregation: phone count and average price per brand ===
+  brand  | phones | avg_price_ngn 
+---------+--------+---------------
+ itel    |     54 |        537229
+ Xiaomi  |     69 |        521246
+ Samsung |     70 |        518472
+ Infinix |     73 |        494183
+ Apple   |     66 |        489494
+ Tecno   |     64 |        482666
+(6 rows)
+
+Time: 4.959 ms
+=== D3  Ankara gowns available in size 12 and in Green (array membership) ===
+    sku     |      name       |       sizes       |       colours       
+------------+-----------------+-------------------+---------------------
+ KSW-000059 | Ankara Gown 59  | ["8", "10", "12"] | ["Green", "Orange"]
+ KSW-000086 | Ankara Gown 86  | ["8", "10", "12"] | ["Green", "Orange"]
+ KSW-000169 | Ankara Gown 169 | ["8", "10", "12"] | ["Green", "Orange"]
+ KSW-000181 | Ankara Gown 181 | ["8", "10", "12"] | ["Green", "Orange"]
+ KSW-000195 | Ankara Gown 195 | ["8", "10", "12"] | ["Green", "Orange"]
+(5 rows)
+
+Time: 0.738 ms
+=== D4  embedded data: one read returns product + seller + rating + latest reviews (no joins) ===
+                jsonb_pretty                
+--------------------------------------------
+ {                                         +
+     "_id": "KSW-000028",                  +
+     "name": "Infinix Smartphone Model 28",+
+     "price": 861186.83,                   +
+     "stock": 393,                         +
+     "active": true,                       +
+     "rating": {                           +
+         "avg": 3.89,                      +
+         "count": 62                       +
+     },                                    +
+     "seller": {                           +
+         "id": 80,                         +
+         "name": "Mega Ventures 80",       +
+         "state": "Lagos"                  +
+     },                                    +
+     "category": {                         +
+         "name": "Mobile Phones",          +
+         "path": [                         +
+             "Electronics",                +
+             "Mobile Phones"               +
+         ]                                 +
+     },                                    +
+     "currency": "NGN",                    +
+     "attributes": {                       +
+         "brand": "Infinix",               +
+         "ram_gb": 6,                      +
+         "network": [                      +
+             "4G"                          +
+         ],                                +
+         "dual_sim": true,                 +
+         "storage_gb": 128,                +
+         "battery_mah": 5000               +
+     },                                    +
+     "recent_reviews": [                   +
+         {                                 +
+             "date": "2026-10-29",         +
+             "text": "Not as described",   +
+             "rating": 4,                  +
+             "customer_id": 43198          +
+         },                                +
+         {                                 +
+             "date": "2026-10-23",         +
+             "text": "Value for money",    +
+             "rating": 2,                  +
+             "customer_id": 18568          +
+         },                                +
+         {                                 +
+             "date": "2026-10-22",         +
+             "text": "Works perfectly",    +
+             "rating": 1,                  +
+             "customer_id": 8225           +
+         }                                 +
+     ]                                     +
+ }
+(1 row)
+
+Time: 0.358 ms
+=== Index: containment queries before/after GIN (jsonb_path_ops) ===
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ Seq Scan on product_catalogue (actual time=0.043..3.333 rows=133 loops=1)
+   Filter: (doc @> '{"category": {"name": "Women''s Clothing"}, "attributes": {"sizes": ["12"], "colours": ["Green"]}}'::jsonb)
+   Rows Removed by Filter: 4867
+   Buffers: shared hit=552
+ Planning Time: 0.160 ms
+ Execution Time: 3.346 ms
+(6 rows)
+
+Time: 3.823 ms
+CREATE INDEX
+Time: 116.652 ms
+ANALYZE
+Time: 24.441 ms
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on product_catalogue (actual time=0.086..0.381 rows=133 loops=1)
+   Recheck Cond: (doc @> '{"category": {"name": "Women''s Clothing"}, "attributes": {"sizes": ["12"], "colours": ["Green"]}}'::jsonb)
+   Heap Blocks: exact=116
+   Buffers: shared hit=123
+   ->  Bitmap Index Scan on ix_catalogue_doc (actual time=0.066..0.066 rows=133 loops=1)
+         Index Cond: (doc @> '{"category": {"name": "Women''s Clothing"}, "attributes": {"sizes": ["12"], "colours": ["Green"]}}'::jsonb)
+         Buffers: shared hit=7
+ Planning:
+   Buffers: shared hit=26
+ Planning Time: 0.400 ms
+ Execution Time: 0.404 ms
+(11 rows)
+
+Time: 1.163 ms
+ gin_index_size 
+----------------
+ 2088 kB
+(1 row)
+
+Time: 0.384 ms
+=== Schema flexibility: a new category (Solar Generators) with NEW attributes - no ALTER TABLE ===
+INSERT 0 1
+Time: 0.750 ms
+            name             | chemistry | ac_sockets 
+-----------------------------+-----------+------------
+ Kasuwa 2kVA Solar Generator | LiFePO4   | 4
+(1 row)
+
+Time: 0.423 ms
+=== Validation still applies: a document without a numeric price is rejected ===
+psql:document_queries.sql:63: ERROR:  new row for relation "product_catalogue" violates check constraint "doc_has_price"
+DETAIL:  Failing row contains (KSW-BAD-01, {"_id": "KSW-BAD-01", "name": "No price", "attributes": {}}).
+Time: 0.342 ms

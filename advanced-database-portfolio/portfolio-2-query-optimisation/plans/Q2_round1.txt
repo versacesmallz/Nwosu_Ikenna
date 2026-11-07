@@ -1,0 +1,79 @@
+-- Q2 [round1] Merchandising report: top 10 Electronics products (whole category tree) by revenue in the last 30 days
+-- random_page_cost=4; median of 7 warm runs: 272.075 ms (min 177.495, max 282.989); planning 0.754 ms; shared buffers touched: 4779
+-- SQL executed:
+--   WITH RECURSIVE cat_tree AS (
+--       SELECT category_id FROM category WHERE category_name = 'Electronics'
+--       UNION ALL
+--       SELECT c.category_id FROM category c JOIN cat_tree t ON c.parent_category_id = t.category_id
+--   )
+--   SELECT p.product_id, p.product_name,
+--          SUM(oi.quantity)                 AS units_sold,
+--          SUM(oi.quantity * oi.unit_price) AS revenue
+--   FROM   orders o
+--   JOIN   order_item oi ON oi.order_id = o.order_id
+--   JOIN   product p     ON p.product_id = oi.product_id
+--   WHERE  o.order_date >= timestamptz '2026-10-31' - interval '30 days'
+--   AND    o.order_status <> 'CANCELLED'
+--   AND    p.category_id IN (SELECT category_id FROM cat_tree)
+--   GROUP  BY p.product_id, p.product_name
+--   ORDER  BY revenue DESC
+--   LIMIT  10;
+
+Limit  (cost=15005.93..15005.95 rows=10 width=65) (actual time=193.866..193.882 rows=10 loops=1)
+  Buffers: shared hit=4779
+  CTE cat_tree
+    ->  Recursive Union  (cost=0.00..19.56 rows=131 width=4) (actual time=0.011..0.046 rows=5 loops=1)
+          Buffers: shared hit=3
+          ->  Seq Scan on category  (cost=0.00..1.23 rows=1 width=4) (actual time=0.010..0.013 rows=1 loops=1)
+                Filter: ((category_name)::text = 'Electronics'::text)
+                Rows Removed by Filter: 17
+                Buffers: shared hit=1
+          ->  Hash Join  (cost=0.33..1.70 rows=13 width=4) (actual time=0.009..0.013 rows=2 loops=2)
+                Hash Cond: (c.parent_category_id = t.category_id)
+                Buffers: shared hit=2
+                ->  Seq Scan on category c  (cost=0.00..1.18 rows=18 width=8) (actual time=0.001..0.003 rows=18 loops=2)
+                      Buffers: shared hit=2
+                ->  Hash  (cost=0.20..0.20 rows=10 width=4) (actual time=0.002..0.002 rows=2 loops=2)
+                      Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                      ->  WorkTable Scan on cat_tree t  (cost=0.00..0.20 rows=10 width=4) (actual time=0.000..0.001 rows=2 loops=2)
+  ->  Sort  (cost=14986.37..14998.87 rows=5000 width=65) (actual time=193.864..193.872 rows=10 loops=1)
+        Sort Key: (sum(((oi.quantity)::numeric * oi.unit_price))) DESC
+        Sort Method: top-N heapsort  Memory: 27kB
+        Buffers: shared hit=4779
+        ->  HashAggregate  (cost=14815.82..14878.32 rows=5000 width=65) (actual time=192.624..193.436 rows=1498 loops=1)
+              Group Key: p.product_id
+              Batches: 1  Memory Usage: 977kB
+              Buffers: shared hit=4779
+              ->  Hash Semi Join  (cost=1477.65..14232.22 rows=46688 width=37) (actual time=135.510..179.229 rows=13218 loops=1)
+                    Hash Cond: (p.category_id = cat_tree.category_id)
+                    Buffers: shared hit=4779
+                    ->  Hash Join  (cost=1473.39..13586.00 rows=46688 width=41) (actual time=135.454..174.271 rows=45840 loops=1)
+                          Hash Cond: (oi.product_id = p.product_id)
+                          Buffers: shared hit=4776
+                          ->  Hash Join  (cost=1301.89..13291.84 rows=46688 width=16) (actual time=133.040..158.692 rows=45840 loops=1)
+                                Hash Cond: (oi.order_id = o.order_id)
+                                Buffers: shared hit=4717
+                                ->  Seq Scan on order_item oi  (cost=0.00..10414.53 rows=600153 width=24) (actual time=0.007..42.080 rows=600153 loops=1)
+                                      Buffers: shared hit=4413
+                                ->  Hash  (cost=1010.16..1010.16 rows=23338 width=8) (actual time=16.725..16.726 rows=22890 loops=1)
+                                      Buckets: 32768  Batches: 1  Memory Usage: 1151kB
+                                      Buffers: shared hit=304
+                                      ->  Index Scan using ix_orders_order_date on orders o  (cost=0.42..1010.16 rows=23338 width=8) (actual time=0.037..10.779 rows=22890 loops=1)
+                                            Index Cond: (order_date >= ('2026-10-31 00:00:00+01'::timestamp with time zone - '30 days'::interval))
+                                            Filter: ((order_status)::text <> 'CANCELLED'::text)
+                                            Rows Removed by Filter: 2045
+                                            Buffers: shared hit=304
+                          ->  Hash  (cost=109.00..109.00 rows=5000 width=29) (actual time=2.398..2.399 rows=5000 loops=1)
+                                Buckets: 8192  Batches: 1  Memory Usage: 374kB
+                                Buffers: shared hit=59
+                                ->  Seq Scan on product p  (cost=0.00..109.00 rows=5000 width=29) (actual time=0.007..1.088 rows=5000 loops=1)
+                                      Buffers: shared hit=59
+                    ->  Hash  (cost=2.62..2.62 rows=131 width=4) (actual time=0.047..0.048 rows=5 loops=1)
+                          Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                          Buffers: shared hit=3
+                          ->  CTE Scan on cat_tree  (cost=0.00..2.62 rows=131 width=4) (actual time=0.013..0.044 rows=5 loops=1)
+                                Buffers: shared hit=3
+Planning:
+  Buffers: shared hit=35
+Planning Time: 1.057 ms
+Execution Time: 194.028 ms

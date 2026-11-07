@@ -1,0 +1,47 @@
+-- Q1 [round1] Customer "My Orders" page: latest 10 orders with totals for one customer (OLTP, runs on every page view)
+-- random_page_cost=4; median of 7 warm runs: 0.165 ms (min 0.132, max 0.268); planning 0.591 ms; shared buffers touched: 32
+-- SQL executed:
+--   SELECT o.order_id, o.order_date, o.order_status,
+--          SUM(oi.quantity * oi.unit_price) AS order_total
+--   FROM   customer c
+--   JOIN   orders o      ON o.customer_id = c.customer_id
+--   JOIN   order_item oi ON oi.order_id   = o.order_id
+--   WHERE  c.email = 'cust20211@mail.kasuwa.ng'
+--   GROUP  BY o.order_id
+--   ORDER  BY o.order_date DESC
+--   LIMIT  10;
+
+Limit  (cost=44.16..44.19 rows=10 width=57) (actual time=0.077..0.090 rows=5 loops=1)
+  Buffers: shared hit=32
+  ->  Sort  (cost=44.16..44.19 rows=12 width=57) (actual time=0.077..0.079 rows=5 loops=1)
+        Sort Key: o.order_date DESC
+        Sort Method: quicksort  Memory: 25kB
+        Buffers: shared hit=32
+        ->  GroupAggregate  (cost=43.65..43.95 rows=12 width=57) (actual time=0.065..0.074 rows=5 loops=1)
+              Group Key: o.order_id
+              Buffers: shared hit=32
+              ->  Sort  (cost=43.65..43.68 rows=12 width=37) (actual time=0.058..0.060 rows=8 loops=1)
+                    Sort Key: o.order_id
+                    Sort Method: quicksort  Memory: 25kB
+                    Buffers: shared hit=32
+                    ->  Nested Loop  (cost=5.32..43.43 rows=12 width=37) (actual time=0.026..0.054 rows=8 loops=1)
+                          Buffers: shared hit=32
+                          ->  Nested Loop  (cost=4.89..40.02 rows=6 width=25) (actual time=0.021..0.027 rows=5 loops=1)
+                                Buffers: shared hit=12
+                                ->  Index Scan using customer_email_key on customer c  (cost=0.41..8.43 rows=1 width=8) (actual time=0.009..0.010 rows=1 loops=1)
+                                      Index Cond: ((email)::text = 'cust20211@mail.kasuwa.ng'::text)
+                                      Buffers: shared hit=4
+                                ->  Bitmap Heap Scan on orders o  (cost=4.48..31.51 rows=7 width=33) (actual time=0.009..0.014 rows=5 loops=1)
+                                      Recheck Cond: (c.customer_id = customer_id)
+                                      Heap Blocks: exact=5
+                                      Buffers: shared hit=8
+                                      ->  Bitmap Index Scan on ix_orders_customer_date  (cost=0.00..4.48 rows=7 width=0) (actual time=0.006..0.006 rows=5 loops=1)
+                                            Index Cond: (customer_id = c.customer_id)
+                                            Buffers: shared hit=3
+                          ->  Index Scan using order_item_order_id_product_id_key on order_item oi  (cost=0.42..0.55 rows=2 width=20) (actual time=0.004..0.004 rows=2 loops=5)
+                                Index Cond: (order_id = o.order_id)
+                                Buffers: shared hit=20
+Planning:
+  Buffers: shared hit=32
+Planning Time: 0.463 ms
+Execution Time: 0.127 ms

@@ -1,0 +1,175 @@
+Kasuwa concurrency demonstrations - 2026-11-05 10:42:39 WAT
+[  0.007s] INFO SELECT version()
+[  0.007s] INFO   -> [('PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit',)]
+[  0.007s] INFO SHOW default_transaction_isolation
+[  0.008s] INFO   -> [('read committed',)]
+
+====================================================================================================
+S1  LOST UPDATE - two buyers, READ COMMITTED, application computes new stock (read-modify-write)
+====================================================================================================
+[  0.026s] SETUP product DEMO-P3-LU (id 5003) stock reset to 5
+[  0.039s] T1   SELECT qty_on_hand FROM inventory WHERE product_id = 5003
+[  0.041s] T1     -> [(5,)]
+[  0.041s] T2   SELECT qty_on_hand FROM inventory WHERE product_id = 5003
+[  0.042s] T2     -> [(5,)]
+[  0.042s] T1   UPDATE inventory SET qty_on_hand = 4 WHERE product_id = 5003
+[  0.043s] T1     -> UPDATE 1
+[  0.043s] T1   INSERT INTO stock_movement (product_id, change_qty, reason) VALUES (5003, -1, 'SALE')
+[  0.044s] T1     -> INSERT 0 1
+[  0.045s] T1   COMMIT
+[  0.046s] T2   UPDATE inventory SET qty_on_hand = 4 WHERE product_id = 5003
+[  0.046s] T2     -> UPDATE 1
+[  0.046s] T2   INSERT INTO stock_movement (product_id, change_qty, reason) VALUES (5003, -1, 'SALE')
+[  0.048s] T2     -> INSERT 0 1
+[  0.048s] T2   COMMIT
+RESULT: units sold = 2, stock should be 3, stock recorded = 4  => LOST UPDATE: one sale vanished from stock
+
+====================================================================================================
+S2  FIX A - PESSIMISTIC LOCKING with SELECT ... FOR UPDATE
+====================================================================================================
+[  0.071s] SETUP product DEMO-P3-LU (id 5003) stock reset to 5
+[  0.083s] T1   SELECT qty_on_hand FROM inventory WHERE product_id = 5003 FOR UPDATE
+[  0.085s] T1     -> [(5,)]
+[  0.086s] T2   SELECT qty_on_hand FROM inventory WHERE product_id = 5003 FOR UPDATE
+[  1.092s] OBS  SELECT pid, wait_event_type, wait_event, state, left(query, 60) AS query
+             FROM pg_stat_activity WHERE datname = 'kasuwa' AND wait_event_type = 'Lock'
+[  1.097s] OBS    -> [(909, 'Lock', 'transactionid', 'active', 'SELECT qty_on_hand FROM inventory WHERE product_id = 5003 FO')]
+[  1.097s] T1   UPDATE inventory SET qty_on_hand = 4 WHERE product_id = 5003
+[  1.098s] T1     -> UPDATE 1
+[  1.098s] T1   INSERT INTO stock_movement (product_id, change_qty, reason) VALUES (5003, -1, 'SALE')
+[  1.099s] T1     -> INSERT 0 1
+[  1.100s] T1   COMMIT
+[  1.100s] T2     -> [(4,)]
+[  1.100s] T2     (waited 1.01s for T1's row lock, then read the COMMITTED value 4)
+[  1.100s] T2   UPDATE inventory SET qty_on_hand = 3 WHERE product_id = 5003
+[  1.101s] T2     -> UPDATE 1
+[  1.101s] T2   INSERT INTO stock_movement (product_id, change_qty, reason) VALUES (5003, -1, 'SALE')
+[  1.102s] T2     -> INSERT 0 1
+[  1.103s] T2   COMMIT
+RESULT: units sold = 2, stock recorded = 3 (expected 3) => CORRECT - T2 was serialised behind T1
+
+====================================================================================================
+S3  FIX B - REPEATABLE READ: concurrent update detected, second transaction must retry
+====================================================================================================
+[  1.117s] SETUP product DEMO-P3-LU (id 5003) stock reset to 5
+[  1.126s] T1   SELECT qty_on_hand FROM inventory WHERE product_id = 5003
+[  1.127s] T1     -> [(5,)]
+[  1.127s] T2   SELECT qty_on_hand FROM inventory WHERE product_id = 5003
+[  1.128s] T2     -> [(5,)]
+[  1.128s] T1   UPDATE inventory SET qty_on_hand = 4 WHERE product_id = 5003
+[  1.129s] T1     -> UPDATE 1
+[  1.129s] T1   INSERT INTO stock_movement (product_id, change_qty, reason) VALUES (5003, -1, 'SALE')
+[  1.130s] T1     -> INSERT 0 1
+[  1.131s] T1   COMMIT
+[  1.131s] T2   UPDATE inventory SET qty_on_hand = 4 WHERE product_id = 5003
+[  1.132s] T2     !! SQLSTATE 40001 ERROR:  could not serialize access due to concurrent update
+[  1.132s] T2   ROLLBACK
+[  1.132s] T2     application retries the whole transaction with a fresh snapshot
+[  1.132s] T2   SELECT qty_on_hand FROM inventory WHERE product_id = 5003
+[  1.132s] T2     -> [(4,)]
+[  1.132s] T2   UPDATE inventory SET qty_on_hand = 3 WHERE product_id = 5003
+[  1.133s] T2     -> UPDATE 1
+[  1.133s] T2   INSERT INTO stock_movement (product_id, change_qty, reason) VALUES (5003, -1, 'SALE')
+[  1.134s] T2     -> INSERT 0 1
+[  1.135s] T2   COMMIT
+RESULT: units sold = 2, stock recorded = 3 (expected 3) => CORRECT after one retry
+
+====================================================================================================
+S4  FIX C - OPTIMISTIC LOCKING: UPDATE ... WHERE version = <version read>
+====================================================================================================
+[  1.155s] SETUP product DEMO-P3-LU (id 5003) stock reset to 5
+[  1.164s] T1   SELECT qty_on_hand, version FROM inventory WHERE product_id = 5003
+[  1.165s] T1     -> [(5, 0)]
+[  1.166s] T1   COMMIT
+[  1.166s] T2   SELECT qty_on_hand, version FROM inventory WHERE product_id = 5003
+[  1.167s] T2     -> [(5, 0)]
+[  1.167s] T2   COMMIT
+[  1.167s] T1   UPDATE inventory SET qty_on_hand = 4, version = version + 1
+           WHERE product_id = 5003 AND version = 0
+[  1.168s] T1     -> UPDATE 1
+[  1.168s] T1   INSERT INTO stock_movement (product_id, change_qty, reason) VALUES (5003, -1, 'SALE')
+[  1.169s] T1     -> INSERT 0 1
+[  1.169s] T1   COMMIT
+[  1.169s] T2   UPDATE inventory SET qty_on_hand = 4, version = version + 1
+           WHERE product_id = 5003 AND version = 0
+[  1.170s] T2     -> UPDATE 0
+[  1.170s] T2     0 rows updated -> version changed since it was read -> conflict detected, re-read and retry
+[  1.170s] T2   ROLLBACK
+[  1.170s] T2   SELECT qty_on_hand, version FROM inventory WHERE product_id = 5003
+[  1.170s] T2     -> [(4, 1)]
+[  1.170s] T2   UPDATE inventory SET qty_on_hand = 3, version = version + 1
+               WHERE product_id = 5003 AND version = 1
+[  1.171s] T2     -> UPDATE 1
+[  1.171s] T2   INSERT INTO stock_movement (product_id, change_qty, reason) VALUES (5003, -1, 'SALE')
+[  1.172s] T2     -> INSERT 0 1
+[  1.172s] T2   COMMIT
+RESULT: units sold = 2, stock recorded = 3 (expected 3) => CORRECT - no locks held between read and write
+
+====================================================================================================
+S5  ISOLATION LEVELS: finance report reads a price twice while a seller changes it
+====================================================================================================
+[  1.193s] SETUP product DEMO-P3-ISO (id 5007) stock reset to 10
+
+--- report transaction at READ COMMITTED ---
+[  1.213s] RPT  SELECT unit_price FROM product WHERE product_id = 5007
+[  1.214s] RPT    -> [(Decimal('50000.00'),)]
+[  1.214s] SELL UPDATE product SET unit_price = unit_price + 5000 WHERE product_id = 5007
+[  1.216s] SELL   -> UPDATE 1
+[  1.216s] SELL COMMIT
+[  1.217s] RPT  SELECT unit_price FROM product WHERE product_id = 5007
+[  1.217s] RPT    -> [(Decimal('55000.00'),)]
+[  1.217s] RPT  COMMIT
+RESULT (READ COMMITTED): first read 50000.00, second read 55000.00 in the SAME transaction => NON-REPEATABLE READ occurred
+
+--- report transaction at REPEATABLE READ ---
+[  1.225s] RPT  SELECT unit_price FROM product WHERE product_id = 5007
+[  1.227s] RPT    -> [(Decimal('55000.00'),)]
+[  1.227s] SELL UPDATE product SET unit_price = unit_price + 5000 WHERE product_id = 5007
+[  1.229s] SELL   -> UPDATE 1
+[  1.230s] SELL COMMIT
+[  1.230s] RPT  SELECT unit_price FROM product WHERE product_id = 5007
+[  1.230s] RPT    -> [(Decimal('55000.00'),)]
+[  1.230s] RPT  COMMIT
+RESULT (REPEATABLE READ): first read 55000.00, second read 55000.00 in the SAME transaction => stable snapshot, no anomaly
+
+====================================================================================================
+S6  DEADLOCK - two baskets containing the same two products, locked in opposite order
+====================================================================================================
+[  1.247s] SETUP product DEMO-P3-DL1 (id 5008) stock reset to 50
+[  1.257s] SETUP product DEMO-P3-DL2 (id 5009) stock reset to 50
+
+--- PROBLEM: T1 locks DL1 then DL2, T2 locks DL2 then DL1 ---
+[  1.266s] T2   UPDATE inventory SET qty_on_hand = qty_on_hand - 1 WHERE product_id = 5009
+[  1.268s] T2     -> UPDATE 1
+[  1.268s] T1   UPDATE inventory SET qty_on_hand = qty_on_hand - 1 WHERE product_id = 5008
+[  1.269s] T1     -> UPDATE 1
+[  1.270s] T1   UPDATE inventory SET qty_on_hand = qty_on_hand - 1 WHERE product_id = 5009
+[  1.768s] T2   UPDATE inventory SET qty_on_hand = qty_on_hand - 1 WHERE product_id = 5008
+[  2.270s] T1     !! SQLSTATE 40P01 ERROR:  deadlock detected
+[  2.270s] T2     -> UPDATE 1
+[  2.271s] T1   ROLLBACK
+[  2.271s] T2   COMMIT
+RESULT: T1 DEADLOCK VICTIM - rolled back by PostgreSQL (app would retry); T2 committed
+
+--- FIX: application always locks basket items in ascending product_id order ---
+[  2.283s] T2   UPDATE inventory SET qty_on_hand = qty_on_hand - 1 WHERE product_id = 5008
+[  2.286s] T2     -> UPDATE 1
+[  2.286s] T1   UPDATE inventory SET qty_on_hand = qty_on_hand - 1 WHERE product_id = 5008
+[  2.786s] T2   UPDATE inventory SET qty_on_hand = qty_on_hand - 1 WHERE product_id = 5009
+[  2.787s] T2     -> UPDATE 1
+[  2.788s] T1     -> UPDATE 1
+[  2.789s] T1   UPDATE inventory SET qty_on_hand = qty_on_hand - 1 WHERE product_id = 5009
+[  2.789s] T2   COMMIT
+[  2.789s] T1     -> UPDATE 1
+[  2.790s] T1   COMMIT
+RESULT: T1 committed; T2 committed
+
+====================================================================================================
+S7  FLASH SALE STRESS TEST - 60 concurrent buyers, 20 units in stock, 1 unit each
+====================================================================================================
+[  2.803s] SETUP product DEMO-P3-FLASH (id 5010) stock reset to 20
+NAIVE: SELECT stock, check in app, UPDATE stock = value_read - 1
+   buyers told 'sold' = 60, rejected = 0, sale records = 60, stock left = 19, stock should be = -40, oversold units = 40  (0.55s)
+[  3.369s] SETUP product DEMO-P3-FLASH (id 5010) stock reset to 20
+ATOMIC: UPDATE ... SET qty = qty - 1 WHERE qty >= 1 RETURNING (row lock + recheck)
+   buyers told 'sold' = 20, rejected = 40, sale records = 20, stock left = 0, stock should be = 0, oversold units = 0  (0.57s)

@@ -1,0 +1,12 @@
+         relname         | pg_size_pretty 
+-------------------------+----------------
+ delivery_pkey           | 6168 kB
+ ix_delivery_open        | 104 kB
+ ix_order_item_product   | 4168 kB
+ ix_orders_customer_date | 9264 kB
+ ix_orders_order_date    | 6600 kB
+ ix_product_name_trgm    | 344 kB
+ mv_daily_product_sales  | 27 MB
+ mv_monthly_region_sales | 16 kB
+(8 rows)
+

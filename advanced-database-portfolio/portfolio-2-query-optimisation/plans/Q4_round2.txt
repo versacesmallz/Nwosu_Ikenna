@@ -1,0 +1,35 @@
+-- Q4 [round2] Catalogue search box: customer types "air fryer"
+-- random_page_cost=1.1; median of 7 warm runs: 0.362 ms (min 0.344, max 0.489); planning 0.198 ms; shared buffers touched: 336
+-- SQL executed:
+--   SELECT p.product_id, p.sku, p.product_name, p.unit_price, i.qty_on_hand
+--   FROM   product p
+--   JOIN   inventory i USING (product_id)
+--   WHERE  p.is_active
+--   AND    p.product_name ILIKE '%air fryer%'
+--   ORDER  BY p.unit_price
+--   LIMIT  20;
+
+Limit  (cost=123.17..123.22 rows=20 width=48) (actual time=0.394..0.397 rows=20 loops=1)
+  Buffers: shared hit=336
+  ->  Sort  (cost=123.17..123.29 rows=48 width=48) (actual time=0.393..0.395 rows=20 loops=1)
+        Sort Key: p.unit_price
+        Sort Method: top-N heapsort  Memory: 27kB
+        Buffers: shared hit=336
+        ->  Nested Loop  (cost=21.95..121.89 rows=48 width=48) (actual time=0.053..0.337 rows=91 loops=1)
+              Buffers: shared hit=336
+              ->  Bitmap Heap Scan on product p  (cost=21.67..59.09 rows=48 width=44) (actual time=0.049..0.147 rows=91 loops=1)
+                    Recheck Cond: ((product_name)::text ~~* '%air fryer%'::text)
+                    Filter: is_active
+                    Rows Removed by Filter: 7
+                    Heap Blocks: exact=48
+                    Buffers: shared hit=63
+                    ->  Bitmap Index Scan on ix_product_name_trgm  (cost=0.00..21.66 rows=51 width=0) (actual time=0.041..0.041 rows=98 loops=1)
+                          Index Cond: ((product_name)::text ~~* '%air fryer%'::text)
+                          Buffers: shared hit=15
+              ->  Index Scan using inventory_pkey on inventory i  (cost=0.28..1.31 rows=1 width=8) (actual time=0.002..0.002 rows=1 loops=91)
+                    Index Cond: (product_id = p.product_id)
+                    Buffers: shared hit=273
+Planning:
+  Buffers: shared hit=15
+Planning Time: 0.225 ms
+Execution Time: 0.413 ms

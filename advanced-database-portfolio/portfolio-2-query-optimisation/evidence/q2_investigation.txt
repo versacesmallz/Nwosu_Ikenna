@@ -1,0 +1,12 @@
+Q2 investigation after round 1 (median of 5 runs each)
+============================================================
+A. As planned by PostgreSQL (hash join, seq scan of 600k order lines):    191.3 ms
+B. Force nested loop (SET enable_hashjoin = off) - diagnostic only:         115.3 ms
+C. Covering index order_item(order_id) INCLUDE(...):                          263.9 ms  (planner still chose hash join)
+
+Diagnosis: order lines for recent orders sit at the END of order_item (ids grow with time),
+so the hash join cannot emit a row until the whole 600k-row table has been read.
+B shows a nested loop is faster, but forcing planner flags in production is fragile.
+C adds a large extra index for no gain. Chosen fix for round 2: SSD cost settings + a daily
+product-sales materialised view, because this is a reporting query that tolerates
+nightly refresh.

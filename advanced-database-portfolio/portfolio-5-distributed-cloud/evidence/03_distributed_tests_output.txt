@@ -1,0 +1,146 @@
+
+================================================================================================
+E1  SHARD ROUTING - a query that includes the shard key is sent to ONE shard only
+================================================================================================
+[   0.01s] SQL> SELECT state_name, count(*) AS orders, round(sum(order_total)) AS revenue FROM orders_global WHERE region_code = 'SS' AND order_date >= '2026-10-01' GROUP BY st
+        Rivers | 3296 | 1627798912
+        Delta | 275 | 142523495
+        Edo | 222 | 121055426
+        Cross River | 241 | 120569294
+        Akwa Ibom | 213 | 112628813
+        Bayelsa | 197 | 86200267
+[   0.05s] plan (VERBOSE):
+          ->  HashAggregate
+                ->  Foreign Scan on kasuwa_dist.orders_south orders_global
+                      Remote SQL: SELECT state_name, order_total FROM public.orders_shard WHERE ((order_date >= '2026-10-01 00:00:00+01')) AND ((region_code =
+[   0.06s] shard_south  (port 5434) holds 192,107 orders
+[   0.08s] shard_north  (port 5435) holds 107,895 orders
+
+================================================================================================
+E2  SCATTER-GATHER - customer lookup WITHOUT the shard key must ask every shard
+================================================================================================
+[   0.08s] SQL> SELECT order_id, order_date, order_total FROM orders_global WHERE customer_id = 20211 ORDER BY order_date DESC LIMIT 5
+        196112 | 2026-06-14 17:43:51.260800+01:00 | 115166.02
+        70666 | 2025-10-21 10:32:30.921331+01:00 | 28776.73
+        57532 | 2025-09-16 20:12:28.215754+01:00 | 45981.60
+        50986 | 2025-08-28 23:53:17.113615+01:00 | 829520.23
+        1 | 2024-11-02 09:18:29.260578+01:00 | 164940.15
+          ->  Merge Append
+                ->  Foreign Scan on kasuwa_dist.orders_north orders_global_1
+                      Remote SQL: SELECT order_id, order_date, order_total FROM public.orders_shard WHERE ((customer_id = 20211)) ORDER BY order_date DESC NUL
+                ->  Foreign Scan on kasuwa_dist.orders_south orders_global_2
+                      Remote SQL: SELECT order_id, order_date, order_total FROM public.orders_shard WHERE ((customer_id = 20211)) ORDER BY order_date DESC NUL
+[   0.10s] same lookup with the shard key (the app knows the customer's zone from the session): 0.69 ms vs without key 1.06 ms
+                ->  Foreign Scan on kasuwa_dist.orders_south orders_global
+                      Remote SQL: SELECT order_id, order_date, order_total FROM public.orders_shard WHERE ((customer_id = 20211)) AND ((region_code = 'SW'))
+
+================================================================================================
+E3  DISTRIBUTED AGGREGATION - GROUP BY pushed down to both shards, run in parallel (async append)
+================================================================================================
+[   1.50s] partition-wise aggregate OFF: coordinator pulls every row and aggregates itself
+        HashAggregate
+          ->  Append
+                ->  Async Foreign Scan on kasuwa_dist.orders_north orders_global_1
+                      Remote SQL: SELECT region_code, state_name, order_total FROM public.orders_shard WHERE ((order_status <> 'CANCELLED')) AND ((order_date 
+                ->  Async Foreign Scan on kasuwa_dist.orders_south orders_global_2
+                      Remote SQL: SELECT region_code, state_name, order_total FROM public.orders_shard WHERE ((order_status <> 'CANCELLED')) AND ((order_date 
+[   1.84s] partition-wise aggregate ON: each shard aggregates its own rows, coordinator only appends 37 result rows
+        Append
+          ->  Async Foreign Scan
+                Relations: Aggregate on (kasuwa_dist.orders_north orders_global)
+                Remote SQL: SELECT region_code, state_name, count(*), sum(order_total) FROM public.orders_shard WHERE ((order_status <> 'CANCELLED')) AND ((or
+          ->  Async Foreign Scan
+                Relations: Aggregate on (kasuwa_dist.orders_south orders_global_1)
+                Remote SQL: SELECT region_code, state_name, count(*), sum(order_total) FROM public.orders_shard WHERE ((order_status <> 'CANCELLED')) AND ((or
+[   4.98s] rows returned to the coordinator: 37 (one per state)
+[   4.98s] median time: pushdown OFF 230 ms | pushdown ON 56 ms | single-node relational query 759 ms
+
+================================================================================================
+E4  AVAILABILITY - shard_north goes down
+================================================================================================
+[   4.98s] $ pg_ctl stop shard_north
+        waiting for server to shut down.... done
+        server stopped
+[   5.19s] south query: SQL> SELECT count(*) AS south_orders FROM orders_global WHERE region_code IN ('SE','SS','SW')
+        192107
+[   5.30s] -> south customers are still served (query never contacts shard_north)
+[   5.30s] global query: SQL> SELECT count(*) FROM orders_global
+[   5.30s] !! global query fails: could not connect to server "srv_shard_north"
+[   5.30s] $ pg_ctl start shard_north
+        waiting for server to start.... done
+        server started
+[   5.43s] after restart: SQL> SELECT count(*) AS all_orders FROM orders_global
+        300002
+
+================================================================================================
+E5  STREAMING REPLICATION - primary 5432 -> hot standby 5433
+================================================================================================
+[   5.63s] primary: SQL> SELECT application_name, state, sync_state, sent_lsn, replay_lsn, pg_wal_lsn_diff(sent_lsn, replay_lsn) AS bytes_behind FROM pg_stat_replication
+        replica1 | streaming | async | 0/690406A0 | 0/690406A0 | 0
+[   5.64s] standby: SQL> SELECT pg_is_in_recovery() AS is_standby, pg_last_wal_replay_lsn() AS replayed_up_to
+        True | 0/690406A0
+[   5.70s] commit-on-primary -> visible-on-standby, 20 trials: median 1.07 ms, max 1.74 ms
+[   5.70s] an order placed and immediately re-read from the standby can therefore be missing for a few ms (stale read)
+[   5.70s] standby: SQL> INSERT INTO kasuwa.replication_probe (note) VALUES ('write on standby')
+[   5.70s] !! standby rejects writes: cannot execute INSERT in a read-only transaction
+[   5.70s] read scaling: product-page query on standby 0.19 ms (same data, same plan as primary) - reporting traffic can be moved off the primary
+
+================================================================================================
+E6  CONSISTENCY vs LATENCY - 300 single-order commits, async vs synchronous replication
+================================================================================================
+[   6.70s] primary: SQL> SELECT application_name, sync_state FROM pg_stat_replication
+        replica1 | sync
+[   7.71s] synchronous_commit=local        median 0.613 ms, p95 1.002 ms  (async: ack after local WAL flush only - standby may lag)
+[   7.71s] synchronous_commit=on           median 1.269 ms, p95 1.979 ms  (sync: ack after standby has flushed WAL to disk)
+[   7.71s] synchronous_commit=remote_apply median 1.157 ms, p95 1.966 ms  (sync: ack after standby has APPLIED it - read-your-writes on standby)
+
+================================================================================================
+E7  CAP IN PRACTICE - synchronous replication with the standby DOWN (network partition)
+================================================================================================
+[   7.71s] $ pg_ctl stop replica1
+        waiting for server to shut down.... done
+        server stopped
+[  10.83s] primary: SQL> SELECT pid, wait_event_type, wait_event, state FROM pg_stat_activity WHERE pid = %s
+        1942 | IPC | SyncRep | active
+[  10.83s] -> the commit is WAITING for a standby that cannot answer: the system chose Consistency over Availability
+[  10.83s] operator cancels the wait: SQL> SELECT pg_cancel_backend(%s)
+        True
+[  10.83s] writer: returned after 3.0s; notices: ['WARNING:  canceling wait for synchronous replication due to user request\nDETAIL:  The transaction has already committed locally, but might not have been replicated to the standby.']
+[  10.83s] -> PostgreSQL warns the row is committed locally but NOT confirmed on the standby
+[  10.84s] synchronous_standby_names reset -> primary is available again in async mode (now favouring Availability)
+[  10.84s] primary: SQL> INSERT INTO kasuwa.replication_probe (note) VALUES ('async while standby down') RETURNING id
+        922
+[  10.84s] $ pg_ctl start replica1
+        waiting for server to start.... done
+        server started
+[  12.97s] primary: SQL> SELECT application_name, state, sync_state, pg_wal_lsn_diff(sent_lsn, replay_lsn) AS bytes_behind FROM pg_stat_replication
+        replica1 | streaming | async | 0
+[  12.97s] -> standby reconnected through its replication slot and caught up on the WAL it missed
+
+================================================================================================
+E8  FAILOVER - primary crashes, standby is promoted
+================================================================================================
+[  13.04s] primary just before the crash: 923 probe rows, newest id 923
+[  13.04s] $ pg_ctl stop -m immediate primary
+        waiting for server to shut down.... done
+        server stopped
+[  13.15s] !! primary unreachable: connection to server at "localhost" (127.0.0.1), port 5432 failed: Connection refused
+[  13.15s] standby: SQL> SELECT pg_promote(wait => true)
+        True
+[  13.25s] promotion took 102 ms
+[  13.25s] new primary: SQL> SELECT pg_is_in_recovery() AS still_standby
+        False
+[  13.26s] new primary: SQL> INSERT INTO kasuwa.replication_probe (note) VALUES ('first write after failover') RETURNING id, note
+        925 | first write after failover
+[  13.26s] rows committed on the old primary that exist on the new primary: 923 of 923 -> no committed data lost
+
+================================================================================================
+CLEAN-UP - restore lab topology (old primary back as primary; promoted node discarded)
+================================================================================================
+[  13.26s] $ pg_ctl stop replica1
+        waiting for server to shut down.... done
+        server stopped
+[  13.38s] $ pg_ctl start primary
+        waiting for server to start.... done
+        server started
+[  13.71s] in production the old primary would instead be re-synced with pg_rewind and rejoin as the new standby; 01_setup_cluster.sh rebuilds replica1 from scratch

@@ -1,0 +1,35 @@
+-- Q5 [round1] Operations: deliveries still open (processing / in transit) for orders older than 3 days
+-- random_page_cost=4; median of 7 warm runs: 84.149 ms (min 78.291, max 121.150); planning 0.576 ms; shared buffers touched: 3024
+-- SQL executed:
+--   SELECT d.delivery_id, d.order_id, d.courier, d.tracking_no, d.dlv_status, o.order_date
+--   FROM   delivery d
+--   JOIN   orders o ON o.order_id = d.order_id
+--   WHERE  d.dlv_status IN ('PROCESSING','IN_TRANSIT')
+--   AND    o.order_date < timestamptz '2026-10-31' - interval '3 days'
+--   ORDER  BY o.order_date;
+
+Gather Merge  (cost=7240.64..7498.47 rows=2242 width=62) (actual time=95.245..99.879 rows=1892 loops=1)
+  Workers Planned: 1
+  Workers Launched: 1
+  Buffers: shared hit=3024
+  ->  Sort  (cost=6240.63..6246.23 rows=2242 width=62) (actual time=82.562..82.644 rows=946 loops=2)
+        Sort Key: o.order_date
+        Sort Method: quicksort  Memory: 93kB
+        Buffers: shared hit=3024
+        Worker 0:  Sort Method: quicksort  Memory: 145kB
+        ->  Hash Join  (cost=210.18..6115.85 rows=2242 width=62) (actual time=80.561..82.111 rows=946 loops=2)
+              Hash Cond: (o.order_id = d.order_id)
+              Buffers: shared hit=2987
+              ->  Parallel Seq Scan on orders o  (cost=0.00..5447.06 rows=174705 width=16) (actual time=0.052..54.278 rows=148412 loops=2)
+                    Filter: (order_date < ('2026-10-31 00:00:00+01'::timestamp with time zone - '3 days'::interval))
+                    Rows Removed by Filter: 1588
+                    Buffers: shared hit=2800
+              ->  Hash  (cost=162.04..162.04 rows=3851 width=54) (actual time=2.098..2.100 rows=3728 loops=2)
+                    Buckets: 4096  Batches: 1  Memory Usage: 351kB
+                    Buffers: shared hit=139
+                    ->  Index Scan using ix_delivery_open on delivery d  (cost=0.28..162.04 rows=3851 width=54) (actual time=0.028..1.115 rows=3728 loops=2)
+                          Buffers: shared hit=139
+Planning:
+  Buffers: shared hit=22
+Planning Time: 0.347 ms
+Execution Time: 100.035 ms

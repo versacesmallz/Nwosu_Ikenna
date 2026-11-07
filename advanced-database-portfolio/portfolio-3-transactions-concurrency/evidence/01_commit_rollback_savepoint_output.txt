@@ -1,0 +1,151 @@
+SET search_path TO kasuwa;
+SET
+DELETE FROM stock_movement WHERE product_id IN (SELECT product_id FROM product WHERE sku LIKE 'DEMO-P3-%');
+DELETE 0
+DELETE FROM inventory      WHERE product_id IN (SELECT product_id FROM product WHERE sku LIKE 'DEMO-P3-%');
+DELETE 0
+DELETE FROM product        WHERE sku LIKE 'DEMO-P3-%' AND product_id NOT IN (SELECT product_id FROM order_item);
+DELETE 0
+INSERT INTO product (sku, seller_id, category_id, product_name, unit_price)
+VALUES ('DEMO-P3-001', 1, 32, 'Demo Air Fryer 5L', 85000.00),
+       ('DEMO-P3-002', 1, 13, 'Demo Wireless Earbuds', 25000.00)
+ON CONFLICT (sku) DO NOTHING;
+INSERT 0 2
+INSERT INTO inventory (product_id, qty_on_hand)
+SELECT product_id, CASE sku WHEN 'DEMO-P3-001' THEN 10 ELSE 1 END FROM product WHERE sku LIKE 'DEMO-P3-%'
+ON CONFLICT (product_id) DO UPDATE SET qty_on_hand = EXCLUDED.qty_on_hand, version = 0;
+INSERT 0 2
+=== Stock before any transaction ===
+SELECT p.sku, i.qty_on_hand FROM product p JOIN inventory i USING (product_id) WHERE p.sku LIKE 'DEMO-P3-%' ORDER BY 1;
+     sku     | qty_on_hand 
+-------------+-------------
+ DEMO-P3-001 |          10
+ DEMO-P3-002 |           1
+(2 rows)
+
+=== CASE 1: successful checkout -> COMMIT ===
+BEGIN;
+BEGIN
+WITH new_order AS (
+      INSERT INTO orders (customer_id, shipping_address_id, order_status)
+      VALUES (101, 101, 'PAID') RETURNING order_id)
+  SELECT order_id AS case1_order_id FROM new_order 
+INSERT INTO order_item (order_id, line_no, product_id, quantity, unit_price)
+  SELECT 300002, 1, product_id, 2, unit_price FROM product WHERE sku = 'DEMO-P3-001';
+INSERT 0 1
+UPDATE inventory SET qty_on_hand = qty_on_hand - 2, updated_at = now()
+  WHERE product_id = (SELECT product_id FROM product WHERE sku = 'DEMO-P3-001');
+UPDATE 1
+INSERT INTO stock_movement (product_id, change_qty, reason, order_id)
+  SELECT product_id, -2, 'SALE', 300002 FROM product WHERE sku = 'DEMO-P3-001';
+INSERT 0 1
+INSERT INTO payment (order_id, method, amount, pay_status, gateway_ref)
+  VALUES (300002, 'CARD', 170000.00, 'SUCCESS', 'PSK-DEMO-' || 300002);
+INSERT 0 1
+COMMIT;
+COMMIT
+SELECT o.order_id, o.order_status, t.order_total, i.qty_on_hand AS stock_after
+FROM orders o JOIN v_order_total t USING (order_id), inventory i
+WHERE o.order_id = 300002
+AND i.product_id = (SELECT product_id FROM product WHERE sku = 'DEMO-P3-001');
+ order_id | order_status | order_total | stock_after 
+----------+--------------+-------------+-------------
+   300002 | PAID         |   170000.00 |           8
+(1 row)
+
+=== CASE 2: payment gateway declines -> ROLLBACK (nothing persists) ===
+SELECT count(*) AS orders_before FROM orders 
+BEGIN;
+BEGIN
+WITH new_order AS (
+      INSERT INTO orders (customer_id, shipping_address_id) VALUES (102, 102) RETURNING order_id)
+  SELECT order_id AS case2_order_id FROM new_order 
+INSERT INTO order_item (order_id, line_no, product_id, quantity, unit_price)
+  SELECT 300003, 1, product_id, 3, unit_price FROM product WHERE sku = 'DEMO-P3-001';
+INSERT 0 1
+UPDATE inventory SET qty_on_hand = qty_on_hand - 3
+  WHERE product_id = (SELECT product_id FROM product WHERE sku = 'DEMO-P3-001');
+UPDATE 1
+SELECT qty_on_hand AS stock_inside_txn FROM inventory
+  WHERE product_id = (SELECT product_id FROM product WHERE sku = 'DEMO-P3-001');
+ stock_inside_txn 
+------------------
+                5
+(1 row)
+
+ROLLBACK;
+ROLLBACK
+SELECT count(*) AS orders_after, 300001 AS orders_before,
+       (SELECT qty_on_hand FROM inventory WHERE product_id = (SELECT product_id FROM product WHERE sku='DEMO-P3-001')) AS stock_after_rollback,
+       (SELECT count(*) FROM orders WHERE order_id = 300003) AS rolled_back_order_exists
+FROM orders;
+ orders_after | orders_before | stock_after_rollback | rolled_back_order_exists 
+--------------+---------------+----------------------+--------------------------
+       300001 |        300001 |                    8 |                        0
+(1 row)
+
+=== CASE 3: constraint violation aborts the whole transaction ===
+BEGIN;
+BEGIN
+UPDATE inventory SET qty_on_hand = qty_on_hand - 1
+  WHERE product_id = (SELECT product_id FROM product WHERE sku = 'DEMO-P3-001');
+UPDATE 1
+UPDATE inventory SET qty_on_hand = qty_on_hand - 5
+  WHERE product_id = (SELECT product_id FROM product WHERE sku = 'DEMO-P3-002');
+psql:01_commit_rollback_savepoint.sql:72: ERROR:  new row for relation "inventory" violates check constraint "inventory_qty_on_hand_check"
+DETAIL:  Failing row contains (5002, -4, 0, 2026-11-05 10:41:33.281184+01).
+SELECT 'this statement is refused' AS after_error;
+psql:01_commit_rollback_savepoint.sql:73: ERROR:  current transaction is aborted, commands ignored until end of transaction block
+COMMIT;
+ROLLBACK
+SELECT p.sku, i.qty_on_hand FROM product p JOIN inventory i USING (product_id) WHERE p.sku LIKE 'DEMO-P3-%' ORDER BY 1;
+     sku     | qty_on_hand 
+-------------+-------------
+ DEMO-P3-001 |           8
+ DEMO-P3-002 |           1
+(2 rows)
+
+=== CASE 4: SAVEPOINT - keep the in-stock line, drop only the failed line ===
+BEGIN;
+BEGIN
+WITH new_order AS (
+      INSERT INTO orders (customer_id, shipping_address_id, order_status)
+      VALUES (103, 103, 'PAID') RETURNING order_id)
+  SELECT order_id AS case4_order_id FROM new_order 
+INSERT INTO order_item (order_id, line_no, product_id, quantity, unit_price)
+  SELECT 300004, 1, product_id, 1, unit_price FROM product WHERE sku = 'DEMO-P3-001';
+INSERT 0 1
+UPDATE inventory SET qty_on_hand = qty_on_hand - 1
+  WHERE product_id = (SELECT product_id FROM product WHERE sku = 'DEMO-P3-001');
+UPDATE 1
+SAVEPOINT before_line2;
+SAVEPOINT
+INSERT INTO order_item (order_id, line_no, product_id, quantity, unit_price)
+    SELECT 300004, 2, product_id, 4, unit_price FROM product WHERE sku = 'DEMO-P3-002';
+INSERT 0 1
+UPDATE inventory SET qty_on_hand = qty_on_hand - 4                       -- only 1 in stock -> fails
+    WHERE product_id = (SELECT product_id FROM product WHERE sku = 'DEMO-P3-002');
+psql:01_commit_rollback_savepoint.sql:92: ERROR:  new row for relation "inventory" violates check constraint "inventory_qty_on_hand_check"
+DETAIL:  Failing row contains (5002, -3, 0, 2026-11-05 10:41:33.281184+01).
+ROLLBACK TO SAVEPOINT before_line2;
+ROLLBACK
+INSERT INTO payment (order_id, method, amount, pay_status, gateway_ref)
+  SELECT 300004, 'TRANSFER', order_total, 'SUCCESS', 'PSK-DEMO-' || 300004
+  FROM v_order_total WHERE order_id = 300004;
+INSERT 0 1
+COMMIT;
+COMMIT
+SELECT oi.order_id, oi.line_no, p.sku, oi.quantity FROM order_item oi JOIN product p USING (product_id)
+WHERE oi.order_id = 300004;
+ order_id | line_no |     sku     | quantity 
+----------+---------+-------------+----------
+   300004 |       1 | DEMO-P3-001 |        1
+(1 row)
+
+SELECT p.sku, i.qty_on_hand FROM product p JOIN inventory i USING (product_id) WHERE p.sku LIKE 'DEMO-P3-%' ORDER BY 1;
+     sku     | qty_on_hand 
+-------------+-------------
+ DEMO-P3-001 |           7
+ DEMO-P3-002 |           1
+(2 rows)
+
